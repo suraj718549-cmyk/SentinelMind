@@ -1,0 +1,37 @@
+[
+  {
+    "alert_id": "ALERT-001",
+    "kind": "phishing_email",
+    "summary": "Email from billing@paypa1-secure.com claiming account suspension, asks recipient to verify identity via link",
+    "indicators": {"sender_domain": "paypa1-secure.com", "sender_ip": "185.220.101.7"},
+    "raw": "URGENT: Your account will be suspended in 24 hours. Click here to verify your identity and avoid interruption."
+  },
+  {
+    "alert_id": "ALERT-002",
+    "kind": "network_ioc",
+    "summary": "Outbound connection from workstation WKS-014 to 185.220.101.7 on port 443, flagged by IDS as low-confidence",
+    "indicators": {"dest_ip": "185.220.101.7", "host": "WKS-014", "port": 443},
+    "raw": "Low-confidence IDS alert: outbound TLS connection, no known signature match."
+  },
+  {
+    "alert_id": "ALERT-003",
+    "kind": "phishing_email",
+    "summary": "Email from noreply@paypa1-secure.com to a different employee, same suspension/verification pattern",
+    "indicators": {"sender_domain": "paypa1-secure.com", "sender_ip": "185.220.101.7"},
+    "raw": "Your PayPal account access has been limited. Confirm your identity within 24 hours to restore full access."
+  },
+  {
+    "alert_id": "ALERT-004",
+    "kind": "network_ioc",
+    "summary": "Internal scheduled backup job from finance-server to backup-nas.internal.local, flagged by new IDS rule",
+    "indicators": {"dest_ip": "10.0.4.22", "host": "finance-server", "port": 445},
+    "raw": "SMB traffic to internal backup NAS, matches nightly backup schedule."
+  },
+  {
+    "alert_id": "ALERT-005",
+    "kind": "network_ioc",
+    "summary": "Outbound connection from workstation WKS-031 to 185.220.101.7 on port 443",
+    "indicators": {"dest_ip": "185.220.101.7", "host": "WKS-031", "port": 443},
+    "raw": "Outbound TLS connection to previously observed external IP."
+  }
+]

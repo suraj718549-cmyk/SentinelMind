@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SentinelMind — Memory-Aware SOC Triage</title>
+<style>
+  :root{
+    --bg: #0a0f14;
+    --panel: #0f1720;
+    --panel-2: #121c27;
+    --line: #1e2b38;
+    --text: #d7e2ea;
+    --text-dim: #7f93a3;
+    --cyan: #4fd8c9;
+    --amber: #e8a94a;
+    --red: #e2596b;
+    --green: #6fce8f;
+    --mono: "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", "Segoe UI", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; min-height:100%;
+    background:var(--bg); color:var(--text);
+    font-family:var(--sans);
+  }
+  body{
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+    background-image:
+      radial-gradient(ellipse 900px 500px at 15% -10%, rgba(79,216,201,0.07), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 100% 0%, rgba(226,89,107,0.05), transparent 60%);
+  }
+  .shell{ max-width:1180px; margin:0 auto; padding:28px 20px 60px; }
+  header{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:6px;}
+  header h1{ font-size:22px; margin:0; letter-spacing:0.2px; font-weight:650; }
+  header h1 span{ color:var(--cyan); }
+  .status-pill{ display:inline-flex; align-items:center; gap:8px; font-family:var(--mono); font-size:12px; background:rgba(79,216,201,0.08); border:1px solid rgba(79,216,201,0.25); padding:4px 12px; border-radius:20px; color:var(--cyan); }
+  .status-dot{ width:8px; height:8px; border-radius:50%; background:var(--cyan); box-shadow:0 0 8px var(--cyan); }
+  .subhead{ color:var(--text-dim); font-size:14px; max-width:760px; margin:6px 0 24px; line-height:1.5; }
+
+  .grid{ display:grid; grid-template-columns: 320px 1fr; gap:18px; }
+  @media (max-width: 860px){ .grid{ grid-template-columns: 1fr; } }
+
+  .panel{
+    background:linear-gradient(180deg, var(--panel), var(--panel-2));
+    border:1px solid var(--line);
+    border-radius:10px;
+  }
+
+  .alert-list{ padding:8px; }
+  .alert-item{
+    display:block; width:100%; text-align:left; background:none; border:none;
+    color:var(--text); padding:12px 12px; border-radius:8px; cursor:pointer;
+    border-left:3px solid transparent; margin-bottom:4px; transition:all 0.15s ease;
+  }
+  .alert-item:hover{ background:rgba(255,255,255,0.03); }
+  .alert-item.active{ background:rgba(79,216,201,0.08); border-left-color:var(--cyan); }
+  .alert-item .aid{ font-family:var(--mono); font-size:11px; color:var(--text-dim); }
+  .alert-item .asum{ font-size:13px; margin-top:3px; line-height:1.35; color:var(--text); }
+  
+  .badge{
+    display:inline-block; font-family:var(--mono); font-size:10.5px; letter-spacing:0.3px;
+    padding:2px 7px; border-radius:20px; margin-top:6px;
+  }
+  .badge.malicious{ background:rgba(226,89,107,0.15); color:var(--red); border:1px solid rgba(226,89,107,0.3); }
+  .badge.suspicious{ background:rgba(232,169,74,0.15); color:var(--amber); border:1px solid rgba(232,169,74,0.3); }
+  .badge.benign{ background:rgba(111,206,143,0.15); color:var(--green); border:1px solid rgba(111,206,143,0.3); }
+
+  .detail{ padding:22px; }
+  .detail-header{ display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; }
+  .detail h2{ font-size:17px; margin:0; font-weight:600; }
+  .btn-triage{
+    background:var(--cyan); color:#061016; font-weight:600; font-family:var(--sans);
+    border:none; border-radius:6px; padding:8px 14px; font-size:12.5px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:6px; transition:opacity 0.2s;
+  }
+  .btn-triage:hover{ opacity:0.9; }
+  .btn-triage:disabled{ opacity:0.4; cursor:not-allowed; }
+
+  .detail .meta{ font-family:var(--mono); font-size:12px; color:var(--text-dim); margin-bottom:18px; }
+
+  .compare{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px;}
+  @media (max-width:640px){ .compare{ grid-template-columns:1fr; } }
+  .mode-card{ border:1px solid var(--line); border-radius:9px; padding:14px; background:rgba(255,255,255,0.015); position:relative; }
+  .mode-card h3{ margin:0 0 10px; font-size:12px; font-family:var(--mono); color:var(--text-dim); font-weight:600; text-transform:uppercase; letter-spacing:0.5px; }
+  .mode-card .verdict-row{ display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  .verdict-word{ font-size:19px; font-weight:650; text-transform:lowercase; }
+  .verdict-word.malicious{ color:var(--red); }
+  .verdict-word.suspicious{ color:var(--amber); }
+  .verdict-word.benign{ color:var(--green); }
+  .confidence{ font-family:var(--mono); font-size:12px; color:var(--text-dim); }
+  .duration{ font-family:var(--mono); font-size:11px; color:var(--cyan); margin-left:auto; }
+  .rationale{ font-size:13px; color:var(--text-dim); line-height:1.5; }
+
+  .memory-thread{ border-top:1px dashed var(--line); margin-top:14px; padding-top:12px; }
+  .memory-thread .label{ font-family:var(--mono); font-size:11px; color:var(--cyan); margin-bottom:8px; }
+  .memory-item{ font-size:12.5px; color:var(--text-dim); background:rgba(79,216,201,0.05); border-left:2px solid var(--cyan); padding:8px 10px; border-radius:0 6px 6px 0; margin-bottom:6px; line-height:1.4; }
+  .memory-item .score{ font-family:var(--mono); color:var(--cyan); margin-right:6px; }
+  .none{ font-size:12.5px; color:var(--text-dim); font-style:italic; }
+
+  /* Interactive feedback panel */
+  .feedback-box{ background:rgba(0,0,0,0.2); border:1px solid var(--line); border-radius:8px; padding:14px; margin-top:18px; }
+  .feedback-box h4{ margin:0 0 10px; font-size:13px; font-family:var(--mono); color:var(--cyan); }
+  .feedback-form{ display:grid; grid-template-columns: 140px 1fr 140px; gap:10px; align-items:center; }
+  @media(max-width:700px){ .feedback-form{ grid-template-columns: 1fr; } }
+  .feedback-form select, .feedback-form input{
+    background:#0a0f14; border:1px solid var(--line); color:var(--text);
+    padding:8px 10px; border-radius:6px; font-size:13px; font-family:var(--sans);
+  }
+  .feedback-form button{
+    background:#1f3347; color:var(--cyan); border:1px solid rgba(79,216,201,0.3);
+    padding:8px 12px; border-radius:6px; font-size:12.5px; cursor:pointer; font-weight:600;
+  }
+  .feedback-form button:hover{ background:rgba(79,216,201,0.15); }
+
+  .defense-log{ margin-top:22px; }
+  .defense-log h3{ font-size:13px; color:var(--text-dim); font-family:var(--mono); font-weight:600; margin-bottom:10px; }
+  .defense-row{ display:grid; grid-template-columns: 120px 140px 90px 140px 1fr; gap:10px; align-items:center;
+    font-size:12.5px; padding:9px 10px; border-bottom:1px solid var(--line); }
+  .defense-row:last-child{ border-bottom:none; }
+  @media (max-width:760px){ .defense-row{ grid-template-columns: 1fr; gap:4px; } }
+  .decision{ font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius:20px; width:fit-content; }
+  .decision.AUTO_RETAIN{ background:rgba(111,206,143,0.15); color:var(--green); border:1px solid rgba(111,206,143,0.3); }
+  .decision.PENDING_APPROVAL{ background:rgba(232,169,74,0.15); color:var(--amber); border:1px solid rgba(232,169,74,0.3); }
+  .decision.REJECTED{ background:rgba(226,89,107,0.15); color:var(--red); border:1px solid rgba(226,89,107,0.3); }
+  .trust{ font-family:var(--mono); color:var(--text-dim); font-size:12px; }
+  .src{ color:var(--text-dim); font-family:var(--mono); font-size:11px; }
+
+  .footnote{ color:var(--text-dim); font-size:11.5px; margin-top:28px; line-height:1.6; border-top:1px solid var(--line); padding-top:14px; }
+  .footnote code{ font-family:var(--mono); color:var(--cyan); }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <h1>Sentinel<span>Mind</span></h1>
+    <div id="backendStatus" class="status-pill">
+      <span class="status-dot"></span>
+      <span id="statusText">Connecting live agent...</span>
+    </div>
+  </header>
+  <p class="subhead">Memory-aware SOC alert triage powered by <strong>Hindsight</strong> and <strong>Groq LLM</strong> reasoning. Select any alert to inspect the live comparison between isolated stateless analysis and memory-informed triage with Memory Defense.</p>
+
+  <div class="grid">
+    <div class="panel alert-list" id="alertList"></div>
+    <div class="panel detail" id="detail"></div>
+  </div>
+
+  <div class="panel defense-log" id="defenseLogPanel" style="padding:18px 22px; margin-top:18px;">
+    <h3>Memory Defense Log — Trust Scoring & Injection Firewall</h3>
+    <div id="defenseLog"></div>
+  </div>
+
+  <div class="footnote">
+    Connected to live Hindsight memory backend & Groq LLM reasoner. Memory Defense blocks prompt injection and poisoning attempts before retaining facts in the bank. See <code>docs/ARCHITECTURE.md</code> and <code>docs/EVALUATION.md</code>.
+  </div>
+</div>
+
+<script>
+let ALERTS = [
+  {
+    id:"ALERT-001", kind:"phishing_email",
+    summary:"Email from billing@paypa1-secure.com claiming account suspension, asks recipient to verify identity via link",
+    indicators:{sender_domain:"paypa1-secure.com", sender_ip:"185.220.101.7"},
+    raw:"Urgent notice: verify account at paypa1-secure.com immediately or your access will be disabled.",
+    stateless:{verdict:"suspicious", confidence:0.60, rationale:"Alert text matches high-risk phishing indicators (account suspension urgency, lookalike domain paypa1-secure.com), warranting immediate suspicious classification.", duration_ms: 1200},
+    memory:{verdict:"malicious", confidence:0.90, rationale:"Typosquatted domain paypa1-secure.com and sender IP 185.220.101.7 correlate with confirmed credential-harvesting phishing campaigns targeting PayPal credentials.", duration_ms: 1140,
+      memories:[{score:0.95, text:"Alert ALERT-001 is a phishing email with indicators sender_domain paypa1-secure.com and sender_ip 185.220.101.7, analyst verdict malicious, confirmed phishing, domain and IP confirmed malicious, tied to credential-harvesting campaign impersonating PayPal."}]}
+  },
+  {
+    id:"ALERT-002", kind:"network_ioc",
+    summary:"Outbound connection from workstation WKS-014 to 185.220.101.7 on port 443, flagged by IDS as low-confidence",
+    indicators:{dest_ip:"185.220.101.7", host:"WKS-014", port:443},
+    raw:"IDS alert low-confidence TCP 443 -> 185.220.101.7",
+    stateless:{verdict:"suspicious", confidence:0.60, rationale:"Outbound TLS connection to an unfamiliar external IP with only a low‑confidence IDS flag.", duration_ms: 975},
+    memory:{verdict:"malicious", confidence:0.90, rationale:"The outbound connection targets IP 185.220.101.7, which was previously confirmed malicious in Alert ALERT-001 as a phishing source.", duration_ms: 1820,
+      memories:[{score:0.95, text:"Alert ALERT-001: analyst verdict = malicious. IP 185.220.101.7 confirmed-malicious, tied to a credential-harvesting campaign impersonating PayPal."}]}
+  },
+  {
+    id:"ALERT-003", kind:"phishing_email",
+    summary:"Email from noreply@paypa1-secure.com to finance lead, requesting urgent credential update",
+    indicators:{sender_domain:"paypa1-secure.com", sender_ip:"185.220.101.7"},
+    raw:"Password expiration alert from paypa1-secure.com",
+    stateless:{verdict:"malicious", confidence:0.80, rationale:"Sender domain paypa1-secure.com exhibits typo-squatting targeting PayPal.", duration_ms: 2135},
+    memory:{verdict:"malicious", confidence:0.95, rationale:"Prior memory confirms domain paypa1-secure.com and sender IP 185.220.101.7 are actively used in PayPal phishing campaign.", duration_ms: 1420,
+      memories:[{score:0.95, text:"Alert ALERT-001: analyst verdict = malicious. Domain paypa1-secure.com confirmed-malicious."}]}
+  },
+  {
+    id:"ALERT-004", kind:"network_ioc",
+    summary:"Internal scheduled backup job from finance-server to backup-nas.internal.local, flagged by new IDS rule",
+    indicators:{dest_ip:"10.0.4.22", host:"finance-server", port:445},
+    raw:"SMB connection to backup-nas on scheduled window",
+    stateless:{verdict:"benign", confidence:0.15, rationale:"Internal host-to-host backup traffic with standard destination port.", duration_ms: 1138},
+    memory:{verdict:"benign", confidence:0.05, rationale:"Recalled memory shows this exact pattern was previously confirmed as a false positive nightly finance backup job.", duration_ms: 1210,
+      memories:[{score:0.95, text:"Alert ALERT-004: analyst verdict = benign. Confirmed benign — false positive, nightly finance-server backup job matching documented schedule."}]}
+  },
+  {
+    id:"ALERT-005", kind:"network_ioc",
+    summary:"Outbound connection from workstation WKS-031 to 185.220.101.7 on port 443",
+    indicators:{dest_ip:"185.220.101.7", host:"WKS-031", port:443},
+    raw:"TLS session established to 185.220.101.7",
+    stateless:{verdict:"suspicious", confidence:0.60, rationale:"Outbound TLS connection to an unfamiliar external IP without local context.", duration_ms: 1307},
+    memory:{verdict:"malicious", confidence:0.90, rationale:"Destination IP 185.220.101.7 was recalled as a confirmed malicious credential-harvesting endpoint.", duration_ms: 1530,
+      memories:[{score:0.95, text:"Alert ALERT-001: analyst verdict = malicious. IP 185.220.101.7 confirmed-malicious, tied to a credential-harvesting campaign impersonating PayPal."}]}
+  }
+];
+
+let DEFENSE_LOG = [
+  {alert:"ALERT-001", source:"analyst_verdict", trust:0.95, decision:"AUTO_RETAIN", reason:"Confirmed analyst verdict with high trust score."},
+  {alert:"ALERT-004", source:"analyst_verdict", trust:0.95, decision:"AUTO_RETAIN", reason:"Nightly backup FP confirmed by analyst."},
+  {alert:"ALERT-002 (poison attempt)", source:"raw_alert_payload", trust:0.00, decision:"REJECTED", reason:"Adversarial injection patterns detected in payload."},
+];
+
+let active = ALERTS[0].id;
+let isTriaging = false;
+
+function badge(v){ return `<span class="badge ${v}">${v}</span>`; }
+
+async function checkBackendStatus(){
+  try {
+    const res = await fetch('/api/status');
+    if (res.ok) {
+      const data = await res.json();
+      document.getElementById('statusText').innerText = `Live (${data.backend} · ${data.reasoner})`;
+    }
+  } catch(e) {
+    document.getElementById('statusText').innerText = 'Backend Standalone (Click Triage to Run Live)';
+  }
+}
+
+async function fetchDefenseLog(){
+  try {
+    const res = await fetch('/api/defense-log');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.log && data.log.length > 0) {
+        DEFENSE_LOG = data.log;
+        renderDefenseLog();
+      }
+    }
+  } catch(e){}
+}
+
+function renderList(){
+  const el = document.getElementById("alertList");
+  el.innerHTML = ALERTS.map(a => `
+    <button class="alert-item ${a.id===active?'active':''}" onclick="selectAlert('${a.id}')">
+      <div class="aid">${a.id} · ${a.kind}</div>
+      <div class="asum">${a.summary}</div>
+      ${badge(a.memory.verdict)}
+    </button>
+  `).join("");
+}
+
+function renderDetail(){
+  const a = ALERTS.find(x => x.id === active);
+  const el = document.getElementById("detail");
+  const memBlock = a.memory.memories.length
+    ? a.memory.memories.map(m => `<div class="memory-item"><span class="score">${m.score.toFixed(2)}</span>${m.text}</div>`).join("")
+    : `<div class="none">No relevant memory recalled.</div>`;
+
+  el.innerHTML = `
+    <div class="detail-header">
+      <div>
+        <h2>${a.id}</h2>
+        <div class="meta">${a.kind} · indicators: ${Object.entries(a.indicators).map(([k,v])=>`${k}=${v}`).join(", ")}</div>
+      </div>
+      <button class="btn-triage" id="triageBtn" onclick="runLiveTriage()" ${isTriaging ? 'disabled' : ''}>
+        ${isTriaging ? '⚡ Triaging Live...' : '⚡ Run Live Triage'}
+      </button>
+    </div>
+    <div class="compare">
+      <div class="mode-card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3>stateless (isolated)</h3>
+          ${a.stateless.duration_ms ? `<span class="duration">${a.stateless.duration_ms} ms</span>` : ''}
+        </div>
+        <div class="verdict-row">
+          <span class="verdict-word ${a.stateless.verdict}">${a.stateless.verdict}</span>
+          <span class="confidence">confidence ${a.stateless.confidence}</span>
+        </div>
+        <div class="rationale">${a.stateless.rationale}</div>
+      </div>
+      <div class="mode-card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3>hindsight-enabled</h3>
+          ${a.memory.duration_ms ? `<span class="duration">${a.memory.duration_ms} ms</span>` : ''}
+        </div>
+        <div class="verdict-row">
+          <span class="verdict-word ${a.memory.verdict}">${a.memory.verdict}</span>
+          <span class="confidence">confidence ${a.memory.confidence}</span>
+        </div>
+        <div class="rationale">${a.memory.rationale}</div>
+        <div class="memory-thread">
+          <div class="label">recalled memory used</div>
+          ${memBlock}
+        </div>
+      </div>
+    </div>
+
+    <div class="feedback-box">
+      <h4>Analyst Feedback & Memory Defense Test</h4>
+      <div class="feedback-form">
+        <select id="fbVerdict">
+          <option value="malicious">Mark Malicious</option>
+          <option value="suspicious">Mark Suspicious</option>
+          <option value="benign">Mark Benign</option>
+        </select>
+        <input type="text" id="fbNotes" placeholder="Analyst rationale or test prompt injection here..." value="Confirmed malicious indicator associated with credential-harvesting campaign." />
+        <button onclick="submitFeedback()">Submit Feedback</button>
+      </div>
+    </div>
+  `;
+}
+
+async function runLiveTriage(){
+  const a = ALERTS.find(x => x.id === active);
+  if (!a || isTriaging) return;
+  isTriaging = true;
+  renderDetail();
+
+  try {
+    const res = await fetch('/api/triage', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        alert_id: a.id,
+        kind: a.kind,
+        summary: a.summary,
+        indicators: a.indicators,
+        raw: a.raw || ""
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      a.stateless = data.stateless;
+      a.memory = data.memory;
+      renderList();
+    } else {
+      alert("Triage request failed with status " + res.status);
+    }
+  } catch(e) {
+    alert("Could not reach live backend API: " + e.message);
+  } finally {
+    isTriaging = false;
+    renderDetail();
+  }
+}
+
+async function submitFeedback(){
+  const a = ALERTS.find(x => x.id === active);
+  const verdict = document.getElementById("fbVerdict").value;
+  const notes = document.getElementById("fbNotes").value;
+  if (!notes) return;
+
+  try {
+    const res = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        alert_id: a.id,
+        kind: a.kind,
+        summary: a.summary,
+        analyst_verdict: verdict,
+        analyst_notes: notes,
+        indicators: a.indicators,
+        raw_payload: a.raw || "",
+        trust_score: 0.95
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      fetchDefenseLog();
+      alert(`Memory Defense Decision: ${data.decision}\nRetained in Hindsight: ${data.retained}\nReason: ${data.reason}`);
+    }
+  } catch(e){
+    alert("Feedback submission failed: " + e.message);
+  }
+}
+
+function renderDefenseLog(){
+  const el = document.getElementById("defenseLog");
+  el.innerHTML = DEFENSE_LOG.map(d => `
+    <div class="defense-row">
+      <span class="src">${d.alert}</span>
+      <span class="src">${d.source}</span>
+      <span class="trust">trust ${d.trust.toFixed(2)}</span>
+      <span class="decision ${d.decision}">${d.decision.replace('_',' ')}</span>
+      <span class="src" style="color:var(--text-dim);">${d.reason || ''}</span>
+    </div>
+  `).join("");
+}
+
+function selectAlert(id){ active = id; renderList(); renderDetail(); }
+
+renderList();
+renderDetail();
+renderDefenseLog();
+checkBackendStatus();
+fetchDefenseLog();
+</script>
+</body>
+</html>
